@@ -1,0 +1,2 @@
+the blending become more \ less clear (if it created with only 1 level
+it will just put the first image on the second image using the mask..)

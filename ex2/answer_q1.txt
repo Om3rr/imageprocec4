@@ -1,0 +1,3 @@
+because the fourier magnitude was created using the frequency multicipation
+such that every frequency from 0 - n/2 is multiplied by factor according to his position
+in the other side the derivative magnitude was created using pixel sub.

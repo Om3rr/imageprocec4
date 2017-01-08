@@ -1,0 +1,2 @@
+the resolution of the weight factor is to create a new image that bold some gradients
+in the image while taking the laplacian (the edges) and give them more weight.

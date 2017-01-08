@@ -1,0 +1,1 @@
+divide by zero! because the formula dividor is sum over pixels in z limits
