@@ -1,5 +1,0 @@
-the fourier blurring will remove high frequencies in the image and as a results
-from this process the edges will become smoother while in the convolution blurring
-we are iterating over the picture and changing the values of each pixel.
-there is some pictures that the fourier blurring will not affect them while convolution
-blurring will affect them.

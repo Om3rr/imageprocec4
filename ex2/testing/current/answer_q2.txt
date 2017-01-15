@@ -1,2 +1,0 @@
-if the center of gaussian wont be at 0,0 the image will split
-to 4 different pieces while ever piece of image will be in the opposite side.

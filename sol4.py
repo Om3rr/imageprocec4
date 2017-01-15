@@ -1,6 +1,4 @@
-from ex1.sol1 import read_image
-from ex2.sol2 import blur_spatial
-from ex3.sol3 import build_gaussian_pyramid, pyramid_blending
+from sol4_utils import *
 from sol4_add import non_maximum_suppression, least_squares_homography, spread_out_corners
 from scipy.ndimage.filters import convolve
 from scipy.ndimage import map_coordinates, affine_transform
@@ -41,18 +39,18 @@ def sample_descriptor(im, pos, desc_rad):
     desc = np.ndarray((curreK, curreK,pos.shape[0]))
     for index, feature in enumerate(pos):
         grid = np.meshgrid(np.arange(feature[1]-desc_rad, feature[1]+desc_rad+1),np.arange(feature[0]-desc_rad, feature[0]+desc_rad+1))
-        dRaw = map_coordinates(im, grid)
+        dRaw = map_coordinates(im, grid, order=1, prefilter='false')
         dRaw = dRaw.reshape((curreK, curreK))
         avg = np.average(dRaw)
         if((np.linalg.norm(dRaw - avg)) == 0):
             continue
         desc[:,:,index] = (dRaw - avg)/(np.linalg.norm(dRaw - avg))
-    return desc
+    return desc.astype(np.float32)
 
 
 def find_features(pyr, radius=3, m=5,n=5):
     points= spread_out_corners(pyr[0],m,n,radius*4)
-    return sample_descriptor(pyr[2], points/4, radius), points
+    return points ,sample_descriptor(pyr[2], points/4, radius)
 
 
 def match_features(desc1, desc2, min_score):
@@ -126,7 +124,7 @@ def ransac_homography(pos1, pos2, num_iters, inlier_tol):
         if(S.shape[0] > maxInliers.shape[0]):
             maxInliers = S
             maxH = H12
-    return maxInliers, maxH
+    return maxH,maxInliers
 
 
 
@@ -138,7 +136,7 @@ def display_matches(im1, im2, pos1,pos2,inliers):
     canvas = np.ndarray((r,c))
     canvas[0:r1,0:c1] = im1
     canvas[0:r2,c1:c] = im2
-    # showImg(canvas)
+    showImg(canvas)
     pos2[:,0] += c1
     plt.scatter(pos2[:,0],pos2[:,1])
     plt.scatter(pos1[:,0],pos1[:,1])
@@ -152,17 +150,13 @@ def display_matches(im1, im2, pos1,pos2,inliers):
 
 def accumulate_homographies(H_successive, m):
     M = len(H_successive)
-    H2m_plus = []
-    H2m_minus = []
-    # creating matrixes from 0 to m
-    H2m_plus.append(np.identity(3, dtype=np.float32))
-    H2m_minus.append(np.identity(3, dtype=np.float32))
-    for i in range(1,m):
-        H2m_plus.append(np.dot(H_successive[m-i],H2m_plus[i-1]))
-    for i in range(m,M):
-        H2m_minus.append(np.dot(np.linalg.inv(H_successive[i]),H2m_minus[i-m]))
-    l = H2m_plus[:-1] + H2m_minus
-    return l
+    matrixes = [None]*(M+1)
+    matrixes[m] = np.identity(3)
+    for i in range(m+1,len(H_successive)+1):
+        matrixes[i] = np.dot(matrixes[i-1], np.linalg.inv(H_successive[i-1]))
+    for i in range(m-1,-1,-1):
+        matrixes[i] = np.dot(H_successive[i],matrixes[i+1])
+    return [matrixes[i]/matrixes[i][2,2] for i in range(len(matrixes))]
 
 def findCorners(ims, Hs):
     corners = [np.empty((0, 2), dtype=np.int)]
@@ -185,43 +179,56 @@ def getCenters(ims, Hs):
         centers = np.append(centers, v)
     return centers
 
-
-
+R = 50 #defining stiching radius
 
 def render_panorama(ims, Hs):
     xmin, xmax, ymin, ymax = findCorners(ims,Hs)
     xmin, ymin = np.abs(xmin), np.abs(ymin)
+    print(xmin,xmax,ymin,ymax)
     Realcntrs = getCenters(ims,Hs).astype(np.int)
     Accumcntrs = np.array([(Realcntrs[i] + Realcntrs[i+1])//2 for i in range(Realcntrs.size-1)]+[xmax]).astype(np.int)
-    if(Accumcntrs[0] > 0):
-        Accumcntrs = np.insert(Accumcntrs,0,[0])
-        Realcntrs = np.insert(Realcntrs,0,[0])
+    print(Realcntrs)
+    Accumcntrs = np.insert(Accumcntrs, 0, [-xmin]) # if xmin < 0 insert xmin  to0
     canvas = np.ndarray((ymin+ymax,xmin+xmax))
+
+    # masks = np.ndarray((len(Accumcntrs)-2, ymin+ymax, R*2))
     for idx,im in enumerate(ims):
         grid = np.array(np.meshgrid(np.arange(Accumcntrs[idx],Accumcntrs[idx+1]),np.arange(-ymin,ymax)))
+        print(Accumcntrs[idx],Accumcntrs[idx+1])
         z,y,x = grid.shape
         ngrid = np.ndarray((y,x,z))
         ngrid[:,:,0], ngrid[:,:,1] = grid[0,:,:], grid[1,:,:]
         poss = apply_homography(ngrid.reshape((x*y,2)),np.linalg.inv(Hs[idx]))
-        mapped = map_coordinates(im,[poss[:,1].reshape((y,x)),poss[:,0].reshape((y,x))])
-        y,x = mapped.shape
-        blended = mapped
-        if(idx != 0):
-            y,x,z = ngrid.shape
-            canvasExists = map_coordinates(canvas, ngrid.T)
-            gradient = np.linspace(0,1, num=x)
-            gradient, y = np.meshgrid(gradient, np.arange(y))
-            gradient[gradient>0.5] = 1
-            gradient[gradient<0.5] = 0
-            showImg(canvasExists)
-            # plt.show()
-            # exit()
-            # blended = pyramid_blending(mapped,canvasExists, gradient, 5, 5,5)
-
+        mapped = map_coordinates(im,[poss[:,1].reshape((y,x)),poss[:,0].reshape((y,x))], order=1, prefilter='false')
         canvas[:,Accumcntrs[idx]+xmin:Accumcntrs[idx+1]+xmin] = mapped
-        showImg(canvas)
-    showImg(canvas)
-    # plt.show()
+        # if(idx!=len(ims)-1):
+        #     masks[idx,:,:] = canvas[:,Accumcntrs[idx+1]+xmin-R:Accumcntrs[idx+1]+xmin+R]
+    # return canvas
+    return canvas.astype(np.float32)
+
+# super function to handle image changes
+def stichThingsTogether(masks, canvas, ims, Hs, Accumcntrs, ys,xmin):
+    # we need to take a piece from old picture (radius length X ymax+ymin) from two different pictures and blend
+    # together
+    for i in range(len(ims)-1):
+        accunCntrs = Accumcntrs[1:-1] # we dont need them, they are bad!!
+        pos = accunCntrs[0]+xmin
+        grid = np.array(np.meshgrid(np.arange(pos-R,pos+R),np.arange(-ys[0],ys[1])))
+        z, y, x = grid.shape
+        ngrid = np.ndarray((y, x, z))
+        ngrid[:, :, 0], ngrid[:, :, 1] = grid[0, :, :], grid[1, :, :]
+        poss1 = apply_homography(ngrid.reshape((x * y, 2)), np.linalg.inv(Hs[i]))
+        mapped1 = map_coordinates(ims[i], [poss1[:, 1].reshape((y, x)), poss1[:, 0].reshape((y, x))], order=1, prefilter='false')
+        poss2 = apply_homography(ngrid.reshape((x * y, 2)), np.linalg.inv(Hs[i+1]))
+        mapped2 = map_coordinates(ims[i+1], [poss2[:, 1].reshape((y, x)), poss2[:, 0].reshape((y, x))], order=1, prefilter='false')
+        mask = masks[i]
+        mask[mask!=0] = 1
+        mask = np.logical_not(mask)
+        blended = pyramid_blending(mapped2,mapped1,mask,5,15,15)
+        canvas[:,pos-R+xmin:pos+R+xmin] = blended
+    return canvas.astype(np.float32)
+
+
 
 
 
